@@ -56,6 +56,12 @@ kvminithart()
   sfence_vma();
 }
 
+
+void
+proc_kvminithart(pagetable_t kpt){
+  w_satp(MAKE_SATP(kpt));
+  sfence_vma();
+}
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -439,4 +445,143 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+
+void
+vmprint(pagetable_t pagetable)
+{
+  // 打印根页表
+  printf("page table %p\n", pagetable);
+  // 重新写个函数是为了传递level级和递归
+  _vmprint(pagetable, 0);
+}
+
+void _vmprint(pagetable_t page, int level){
+  for(int i = 0; i < 512; ++i)
+  {
+    pte_t pte = page[i];
+    if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0)
+    {
+      uint64 child = PTE2PA(pte);
+      for(int j = 0; j <= level; ++j)
+      {
+        if(j != level)
+          printf(".. ");
+        else
+          printf("..");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, child);
+      _vmprint((pagetable_t)child, level + 1);
+    }
+    else if(pte & PTE_V)
+    {
+      uint64 child = PTE2PA(pte);
+      for(int j = 0; j <= level; ++j)
+      {
+        if(j != level)
+          printf(".. ");
+        else
+          printf("..");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, child);
+    }
+  }
+
+}
+
+void
+each_kvmmap(pagetable_t my, uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(my, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
+
+pagetable_t
+each_kvminit()
+{
+  pagetable_t each  = (pagetable_t) kalloc();
+  memset(each, 0, PGSIZE);
+
+  // uart registers
+  each_kvmmap(each, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  each_kvmmap(each, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  each_kvmmap(each, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  each_kvmmap(each, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  each_kvmmap(each, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  each_kvmmap(each, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  each_kvmmap(each, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  return each;
+}
+
+void
+uvm_user2ker_copy(pagetable_t u, pagetable_t k, uint64 start, uint64 end)
+{
+  
+  pte_t *user;
+  pte_t *kernel;
+  for(uint64 i = start; i < end; i += PGSIZE)
+  {
+    user = walk(u, i, 0);
+    kernel = walk(k, i, 1);
+ /*
+	根据内核态页表的特点--直接映射到物理内存
+	我们无需使用mappage建立映射
+	记得消除PTE_U标志位
+ */
+    *kernel = (*user) & (~PTE_U);
+  }
+
+}
+
+/*-----------------------------------------*/
+// 为进程的内核页表新建一个初始化函数
+pagetable_t proc_kpt_init(){
+
+  pagetable_t kpt = (pagetable_t) kalloc();
+  memset(kpt, 0, PGSIZE);
+
+  // uart registers
+  proc_kvmmmap(kpt, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  proc_kvmmmap(kpt, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  proc_kvmmmap(kpt, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  proc_kvmmmap(kpt, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  proc_kvmmmap(kpt, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  proc_kvmmmap(kpt, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  proc_kvmmmap(kpt, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  return kpt;
+}
+
+
+// kvmmap是为内核页表的虚拟地址与物理地址做映射，这里需要重新添加一个类似的函数
+void proc_kvmmmap(pagetable_t kpt, uint64 va, uint64 pa, uint64 sz, int perm){
+  if(mappages(kpt, va, sz, pa, perm) != 0)
+    panic("proc_kvmmap");
 }
