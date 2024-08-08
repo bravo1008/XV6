@@ -122,7 +122,6 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
-  uvm_user2ker_copy(p->pagetable, p->kernel_pagetable, 0, sz);
 
   if(p->pid==1) vmprint(p->pagetable);
 

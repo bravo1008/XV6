@@ -34,14 +34,14 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      /*char *pa = kalloc();
+      char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;*/
+      p->kstack = va;
   }
-  //kvminithart();
+  kvminithart();
 }
 
 // Must be called with interrupts disabled,
@@ -114,15 +114,6 @@ found:
     return 0;
   }
 
- p->kernel_pagetable = each_kvminit();
-  // 申请内核栈，确保每一个进程的内核页表都关于该进程的内核栈有一个映射
-  char *pa = kalloc();
-  if(pa == 0)
-    panic("allocpron:kalloc\n");
-  uint64 va = MAXVA - 4*PGSIZE;
-  mappages(p->kernel_pagetable, va, PGSIZE,(uint64)pa, PTE_R|PTE_W);
-  p->kstack = va;
-
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -132,36 +123,6 @@ found:
   return p;
 }
 
-//模仿freewalk，但对叶子节点只做取消映射操作
-void 
-free_kernel_pagetable(pagetable_t pagetable)
-{
-  for(int i = 0; i < 512; ++i)
-  {
-    pte_t pte = pagetable[i];
-    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0)//page direct
-    {
-      pagetable[i] = 0;
-      free_kernel_pagetable((pagetable_t)PTE2PA(pte));
-    } else if(pte & PTE_V){
-      pagetable[i] = 0;
-    }
-  }
-  kfree((void *)pagetable);
-}
-
-void 
-proc_free_kernel_pagetable(struct proc *p)
-{
-  //release the phycial memory first
-  if(p->kstack)
-  {
-    pte_t *pte = walk(p->kernel_pagetable, p->kstack, 0);
-    kfree((void *)PTE2PA(*pte));
-    p->kstack = 0;
-  }
-  free_kernel_pagetable(p->kernel_pagetable);
-}
 
 // free a proc structure and the data hanging from it,
 // including user pages.
@@ -174,9 +135,7 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
-  if(p->kernel_pagetable)
-    proc_free_kernel_pagetable(p);
-  p->kernel_pagetable = 0;
+
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -257,7 +216,7 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
-  uvm_user2ker_copy(p->pagetable, p->kernel_pagetable, 0, p->sz);
+
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -312,7 +271,7 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-  uvm_user2ker_copy(np->pagetable, np->kernel_pagetable, 0, np->sz);
+
 
   np->parent = p;
 
@@ -512,14 +471,7 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
-        //切换到进程内核页表
-        w_satp(MAKE_SATP(p->kernel_pagetable));
-        sfence_vma();
 
-        swtch(&c->context, &p->context);
-
-        //切换回全局内核页表
-        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
