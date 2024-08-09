@@ -132,3 +132,24 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+/**
+ * @brief backtrace 回溯函数调用的返回地址
+ */
+void       
+backtrace(){
+  // 读取当前Frame Pointer
+  uint64* fp =(uint64*) r_fp();
+  uint64 up = PGROUNDUP((uint64)fp);
+  uint64* ra;
+  printf("backtrace:\n");
+  while((uint64)fp!=up){
+    // 返回地址保存在-8偏移的位置
+    fp = (uint64*)((uint64)fp-16);
+    ra = (uint64*)((uint64)fp+8);
+  printf("%p\n",*ra);
+    // 前一个帧指针保存在-16偏移的位置
+    fp = (uint64*)*fp;
+  }
+}
+
