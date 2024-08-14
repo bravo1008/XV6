@@ -9,8 +9,6 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
-struct trapframe;
-
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -82,7 +80,7 @@ int             pipewrite(struct pipe*, uint64, int);
 void            printf(char*, ...);
 void            panic(char*) __attribute__((noreturn));
 void            printfinit(void);
-void            backtrace();
+void            backtrace(void);
 
 // proc.c
 int             cpuid(void);
@@ -148,7 +146,6 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
-void            switchTrapframe(struct trapframe*,struct trapframe*);
 
 // uart.c
 void            uartinit(void);
